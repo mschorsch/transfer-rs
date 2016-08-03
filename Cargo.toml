@@ -1,0 +1,21 @@
+[package]
+name = "transfer-rs"
+version = "0.1.0"
+authors = ["mschorsch <schorschmatthias@googlemail.com>"]
+
+[dependencies]
+clap = "2.9.3"
+rand = "0.3.14"
+quick-error = "1.1.0"
+mime_guess = "1.8.0"
+log = "0.3.6"
+simple_logger = "0.4.0"
+regex = "0.1.73"
+lazy_static = "0.2.1"
+router = "0.2.0"
+hyper = "0.9.10"
+# multipart = "0.7.0"
+
+[dependencies.iron]
+version = "0.4.0"
+features = ["ssl"]
