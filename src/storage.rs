@@ -6,8 +6,10 @@ use iron::mime::Mime;
 
 use errors::*;
 
-pub trait Storage<OR: io::Read>: Clone + Send + Sync + 'static {
-    fn get(&self, token: &str, filename: &str) -> Result<(OR, Mime, u64)>;
+pub trait Storage: Clone + Send + Sync + 'static {
+    type Output: io::Read + Send + Sync + 'static;
+
+    fn get(&self, token: &str, filename: &str) -> Result<(Self::Output, Mime, u64)>;
 
     fn head(&self, token: &str, filename: &str) -> Result<(Mime, u64)>;
 
@@ -25,7 +27,9 @@ pub trait Storage<OR: io::Read>: Clone + Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub struct EmptyStorage;
 
-impl Storage<io::Empty> for EmptyStorage {
+impl Storage for EmptyStorage {
+    type Output = io::Empty;
+
     fn get(&self, _: &str, filename: &str) -> Result<(io::Empty, Mime, u64)> {
         Ok((io::empty(), get_mime_type(filename), 0))
     }
@@ -54,7 +58,9 @@ impl LocalStorage {
     }
 }
 
-impl Storage<fs::File> for LocalStorage {
+impl Storage for LocalStorage {
+    type Output = fs::File;
+
     fn get(&self, token: &str, filename: &str) -> Result<(fs::File, Mime, u64)> {
         let path = Path::new(&self.base_dir).join(token).join(filename);
 

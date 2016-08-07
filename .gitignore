@@ -1,2 +1,8 @@
 target
 Cargo.lock
+
+# windows test specifics
+libeay32.dll
+libssl32.dll
+certificate.crt
+privatekey.key

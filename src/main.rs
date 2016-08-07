@@ -47,7 +47,6 @@ use log::LogLevel;
 use iron::prelude::*;
 use router::Router;
 
-use std::io::Read;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -177,10 +176,7 @@ fn set_loglevel(cmd_level: &str) {
     simple_logger::init_with_level(level).unwrap();
 }
 
-fn init_handler_chain<R, S>(storage: S) -> Chain
-    where R: Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+fn init_handler_chain<S: Storage>(storage: S) -> Chain {
     let mut router = Router::new();
 
     // Routes

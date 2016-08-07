@@ -1,5 +1,3 @@
-use std::io;
-use std::marker;
 use std::path::Path;
 
 use iron::prelude::*;
@@ -27,30 +25,17 @@ pub fn health_handler(_: &mut Request) -> IronResult<Response> {
 // GET handler
 //
 #[derive(Debug)]
-pub struct GetHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+pub struct GetHandler<S: Storage> {
     storage: S,
-    _marker: marker::PhantomData<R>,
 }
 
-impl<R, S> GetHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+impl<S: Storage> GetHandler<S> {
     pub fn new(storage: S) -> Self {
-        GetHandler {
-            storage: storage,
-            _marker: marker::PhantomData,
-        }
+        GetHandler { storage: storage }
     }
 }
 
-impl<R, S> Handler for GetHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+impl<S: Storage> Handler for GetHandler<S> {
     fn handle(&self, req: &mut Request) -> IronResult<Response> {
         let params = req.extensions.get::<Router>().unwrap();
         let token = &params["token"];
@@ -93,30 +78,17 @@ impl<R, S> Handler for GetHandler<R, S>
 // PUT handler
 //
 #[derive(Debug)]
-pub struct PutHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+pub struct PutHandler<S: Storage> {
     storage: S,
-    _marker: marker::PhantomData<R>,
 }
 
-impl<R, S> PutHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+impl<S: Storage> PutHandler<S> {
     pub fn new(storage: S) -> Self {
-        PutHandler {
-            storage: storage,
-            _marker: marker::PhantomData,
-        }
+        PutHandler { storage: storage }
     }
 }
 
-impl<R, S> Handler for PutHandler<R, S>
-    where R: io::Read + Send + Sync + 'static,
-          S: Storage<R> + Clone + Send + Sync + 'static
-{
+impl<S: Storage> Handler for PutHandler<S> {
     fn handle(&self, req: &mut Request) -> IronResult<Response> {
         let params = req.extensions.get::<Router>().unwrap();
         let ref filename = sanitize::sanitize_filename(&params["filename"]);
@@ -179,7 +151,10 @@ impl BeforeMiddleware for CheckHostHeaderMiddleware {
     fn before(&self, req: &mut Request) -> IronResult<()> {
         match req.headers.get::<headers::Host>() {
             Some(_) => Ok(()),
-            None => Err(IronError::new(HttpError::Header, (status::BadRequest, "Host header not found"))),  
+            None => {
+                Err(IronError::new(HttpError::Header,
+                                   (status::BadRequest, "Host header not found")))
+            }  
         }
     }
 }
