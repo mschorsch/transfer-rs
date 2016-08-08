@@ -1,8 +1,8 @@
 // Inspired by https://github.com/dutchcoders/transfer.sh
 //
-// #![allow(unused_imports)]
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
 
 // externs
 //
@@ -30,6 +30,8 @@ extern crate router;
 extern crate quick_error;
 extern crate mime_guess;
 
+extern crate openssl;
+
 // modules
 //
 mod handler;
@@ -37,6 +39,7 @@ mod codec;
 mod storage;
 mod errors;
 mod sanitize;
+mod ssl;
 
 // use
 //
