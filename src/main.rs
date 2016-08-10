@@ -3,6 +3,7 @@
 // #![allow(unused_imports)]
 // #![allow(unused_variables)]
 // #![allow(dead_code)]
+// #![allow(unused_must_use)]
 
 // externs
 //
@@ -25,6 +26,7 @@ extern crate iron;
 
 #[macro_use]
 extern crate router;
+extern crate multipart;
 
 #[macro_use]
 extern crate quick_error;
@@ -181,26 +183,35 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
 
     // Routes
 
-    // Health handler
+    // ** Health handler
     router.get(r"/health.html", health_handler);
 
-    // PUT upload handler
-    router.put(r"/put/:filename", PutHandler::new(storage.clone()));
-    router.put(r"/upload/:filename", PutHandler::new(storage.clone()));
-    router.put(r"/:filename", PutHandler::new(storage.clone()));
+    // ** PUT upload handler
+    let put_handler = PutHandler::new(storage.clone());
 
-    // POST
-    // TODO
+    // multipart/form
+    router.put(r"/put", put_handler.clone());
+    router.put(r"/upload", put_handler.clone());
+    router.put(r"/", put_handler.clone());
 
-    // Download handler
-    router.get(r"/download/:token/:filename",
-               GetHandler::new(storage.clone()));
-    router.get(r"/:token/:filename", GetHandler::new(storage.clone()));
-    router.get(r"/get/:token/:filename", GetHandler::new(storage.clone()));
+    // octet-stream
+    router.put(r"/put/:filename", put_handler.clone());
+    router.put(r"/upload/:filename", put_handler.clone());
+    router.put(r"/:filename", put_handler.clone());
 
-    // chain
+    // ** POST
+    router.post(r"/", PostHandler::new(storage.clone()));
+
+    // ** GET handler
+    let get_handler = GetHandler::new(storage.clone());
+    router.get(r"/download/:token/:filename", get_handler.clone());
+    router.get(r"/:token/:filename", get_handler.clone());
+    router.get(r"/get/:token/:filename", get_handler.clone());
+
+    // Chain
     let mut chain = Chain::new(router);
     chain.link_before(CheckHostHeaderMiddleware);
+    chain.link_before(MultipartMiddleware);
     chain.link_after(NotFoundMiddleware);
     chain.link_after(InfoMiddleware);
 
