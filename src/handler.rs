@@ -100,54 +100,9 @@ impl<S: Storage> Handler for PutHandler<S> {
         if let Some(boundary_name) = req.extensions.get::<Boundary>().map(|b| b.name()) {
             handle_multipart_request(&self.storage, req, &boundary_name)
         } else {
-            handle_put_request(&self.storage, req)
+            handle_normal_request(&self.storage, req)
         }
     }
-}
-
-fn handle_put_request<S: Storage>(storage: &S, req: &mut IronRequest) -> IronResult<IronResponse> {
-    let params = req.extensions.get::<Router>().unwrap();
-    let ref filename = sanitize::sanitize_filename(&params["filename"]);
-
-    let content_length: u64 = req.headers.get::<headers::ContentLength>().map_or(0, |ct| ct.0);
-    let content_type: Mime = req.headers
-        .get::<headers::ContentType>()
-        .map_or_else(|| get_mime_from_filename(&filename), |ct| ct.0.clone());
-    let host_address = host_to_host_address(req.headers.get::<headers::Host>().unwrap()); // safe unwrap
-    let token = codec::random_token();
-
-    info!("Uploading => token: '{}', filename: '{}', content length: {}, content type: '{}'",
-          token,
-          filename,
-          content_length,
-          content_type);
-
-    let storage_result = storage.put(&token, &filename, &mut req.body);
-
-    match storage_result {
-        Err(err) => {
-            error!("{}", err);
-            Ok(IronResponse::with((status::InternalServerError, "Could not save file")))
-        }
-        Ok(_) => {
-            let url_scheme = req.url.scheme();
-            let msg = format!("{}://{}/{}/{}\n", url_scheme, host_address, token, filename);
-            let header = modifiers::Header(headers::ContentType::plaintext());
-            Ok(IronResponse::with((status::Ok, msg, header)))
-        }
-    }
-}
-
-fn host_to_host_address(host: &headers::Host) -> String {
-    if host.port.is_none() {
-        host.hostname.to_owned()
-    } else {
-        format!("{}:{}", host.hostname, host.port.unwrap())
-    }
-}
-
-fn get_mime_from_filename(filename: &str) -> Mime {
-    mime_guess::guess_mime_type(Path::new(filename))
 }
 
 
@@ -166,14 +121,56 @@ impl<S: Storage> PostHandler<S> {
 
 impl<S: Storage> Handler for PostHandler<S> {
     fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
-        let boundary = match req.extensions.get::<Boundary>() {
-            Some(boundary) => boundary.name(),
-            None => {
-                return Ok(IronResponse::with((status::BadRequest, "Not a multipart/form request")))
-            }
-        };
+        if let Some(boundary_name) = req.extensions.get::<Boundary>().map(|b| b.name()) {
+            handle_multipart_request(&self.storage, req, &boundary_name)
+        } else {
+            handle_normal_request(&self.storage, req)
+        }
+    }
+}
 
-        handle_multipart_request(&self.storage, req, &boundary)
+fn handle_normal_request<S: Storage>(storage: &S,
+                                     req: &mut IronRequest)
+                                     -> IronResult<IronResponse> {
+    let params = req.extensions.get::<Router>().unwrap();
+    let ref filename = sanitize::sanitize_filename(&params["filename"]);
+
+    let content_length: u64 = req.headers.get::<headers::ContentLength>().map_or(0, |ct| ct.0);
+    let content_type: Mime = req.headers
+        .get::<headers::ContentType>()
+        .map_or_else(|| mime_guess::guess_mime_type(Path::new(filename)),
+                     |ct| ct.0.clone());
+    let host_address = host_to_host_address(req.headers.get::<headers::Host>().unwrap()); // safe unwrap
+    let token = codec::random_token();
+
+    info!("Uploading => token: '{}', filename: '{}', content length: {}, content type: '{}'",
+          token,
+          filename,
+          content_length,
+          content_type);
+
+    storage.put(&token, &filename, &mut req.body)
+        .and_then(|_| {
+            let url_scheme = req.url.scheme();
+            let msg = format!("{}://{}/download/{}/{}\n",
+                              url_scheme,
+                              host_address,
+                              token,
+                              filename);
+            let header = modifiers::Header(headers::ContentType::plaintext());
+            Ok(IronResponse::with((status::Ok, msg, header)))
+        })
+        .or_else(|err| {
+            error!("{}", err);
+            Ok(IronResponse::with((status::InternalServerError, "Could not save file")))
+        })
+}
+
+fn host_to_host_address(host: &headers::Host) -> String {
+    if host.port.is_none() {
+        host.hostname.to_owned()
+    } else {
+        format!("{}:{}", host.hostname, host.port.unwrap())
     }
 }
 
@@ -225,6 +222,18 @@ fn handle_multipart_request<S: Storage>(storage: &S,
 
 // MultipartMiddleware
 //
+struct Boundary(String);
+
+impl Boundary {
+    fn name(&self) -> String {
+        self.0.clone()
+    }
+}
+
+impl Key for Boundary {
+    type Value = Self;
+}
+
 pub struct MultipartMiddleware;
 
 impl BeforeMiddleware for MultipartMiddleware {
@@ -242,19 +251,6 @@ impl BeforeMiddleware for MultipartMiddleware {
 
         Ok(())
     }
-}
-
-// Boundary
-struct Boundary(String);
-
-impl Boundary {
-    fn name(&self) -> String {
-        self.0.clone()
-    }
-}
-
-impl Key for Boundary {
-    type Value = Self;
 }
 
 // CheckHostHeaderMiddleware

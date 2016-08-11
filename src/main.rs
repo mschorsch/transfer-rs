@@ -188,25 +188,17 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
 
     // ** PUT upload handler
     let put_handler = PutHandler::new(storage.clone());
-
-    // multipart/form
-    router.put(r"/put", put_handler.clone());
-    router.put(r"/upload", put_handler.clone());
-    router.put(r"/", put_handler.clone());
-
-    // octet-stream
-    router.put(r"/put/:filename", put_handler.clone());
-    router.put(r"/upload/:filename", put_handler.clone());
-    router.put(r"/:filename", put_handler.clone());
+    router.put(r"/upload", put_handler.clone()); // multipart/form
+    router.put(r"/upload/:filename", put_handler.clone()); // octet-stream
 
     // ** POST
-    router.post(r"/", PostHandler::new(storage.clone()));
+    let post_handler = PostHandler::new(storage.clone());
+    router.put(r"/upload", post_handler.clone()); // multipart/form
+    router.put(r"/upload/:filename", post_handler.clone()); // octet-stream
 
     // ** GET handler
-    let get_handler = GetHandler::new(storage.clone());
-    router.get(r"/download/:token/:filename", get_handler.clone());
-    router.get(r"/:token/:filename", get_handler.clone());
-    router.get(r"/get/:token/:filename", get_handler.clone());
+    router.get(r"/download/:token/:filename",
+               GetHandler::new(storage.clone()));
 
     // Chain
     let mut chain = Chain::new(router);
