@@ -2,7 +2,7 @@
 // Copied http://hyper.rs/hyper/v0.9.10/src/hyper/src/net.rs.html#707-718
 // Intermediate certificate added
 
-// !! remove this module when iron supports intermidiate certificates !! 
+// !! Remove this module when iron supports intermediate certificates !! 
 
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::path::Path;
@@ -63,7 +63,7 @@ impl<H: IronHandler> TransferServer<H> {
                                    addr: A,
                                    certificate: PathBuf,
                                    key: PathBuf,
-                                   chain_certificate: Option<PathBuf>)
+                                   certificate_chain: Option<PathBuf>)
                                    -> IronHttpResult<Listening> {
         let sock_addr = addr.to_socket_addrs()
             .ok()
@@ -76,7 +76,7 @@ impl<H: IronHandler> TransferServer<H> {
             key: key.clone(),
         });
 
-        let ssl = try!(create_openssl(certificate, key, chain_certificate));
+        let ssl = try!(create_openssl(certificate, key, certificate_chain));
         let mut server = try!(HyperServer::https(sock_addr, ssl));
         let timeouts = Timeouts::default();
         server.keep_alive(timeouts.keep_alive);
@@ -89,7 +89,7 @@ impl<H: IronHandler> TransferServer<H> {
 // see http://hyper.rs/hyper/v0.9.10/src/hyper/src/net.rs.html#707-718
 fn create_openssl<C, K, R>(certificate: C,
                            key: K,
-                           chain_certificate: Option<R>)
+                           certificate_chain: Option<R>)
                            -> Result<Openssl, SslError>
     where C: AsRef<Path>,
           K: AsRef<Path>,
@@ -101,8 +101,9 @@ fn create_openssl<C, K, R>(certificate: C,
     try!(ctx.set_certificate_file(certificate.as_ref(), X509FileType::PEM));
     try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
 
-    if chain_certificate.is_some() {
-        try!(ctx.set_certificate_chain_file(chain_certificate.unwrap().as_ref(), X509FileType::PEM));
+    // intermediate cert support
+    if certificate_chain.is_some() {
+        try!(ctx.set_certificate_chain_file(certificate_chain.unwrap().as_ref(), X509FileType::PEM));
     }
 
     ctx.set_verify(SSL_VERIFY_NONE, None);
