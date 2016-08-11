@@ -12,8 +12,9 @@ log = "0.3.6"
 simple_logger = "0.4.0"
 regex = "0.1.73"
 lazy_static = "0.2.1"
-router = "0.2.0"
 hyper = "0.9.10"
+num_cpus = "0.2"
+router = "0.2.0"
 
 [dependencies.iron]
 version = "0.4.0"
