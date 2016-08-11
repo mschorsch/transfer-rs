@@ -6,3 +6,4 @@ libeay32.dll
 libssl32.dll
 certificate.crt
 privatekey.key
+.vscode/

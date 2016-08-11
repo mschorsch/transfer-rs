@@ -13,13 +13,7 @@ pub trait Storage: Clone + Send + Sync + 'static {
 
     fn head(&self, token: &str, filename: &str) -> Result<(Mime, u64)>;
 
-    fn put<IR: io::Read>(&self,
-                         token: &str,
-                         filename: &str,
-                         reader: &mut IR,
-                         content_type: &Mime,
-                         content_length: u64)
-                         -> Result<()>;
+    fn put<R: io::Read>(&self, token: &str, filename: &str, reader: &mut R) -> Result<()>;
 
     fn is_not_exist(&self, err: &TransferError) -> bool;
 }
@@ -38,7 +32,7 @@ impl Storage for EmptyStorage {
         Ok((get_mime_type(filename), 0))
     }
 
-    fn put<IR: io::Read>(&self, _: &str, _: &str, _: &mut IR, _: &Mime, _: u64) -> Result<()> {
+    fn put<R: io::Read>(&self, _: &str, _: &str, _: &mut R) -> Result<()> {
         Ok(())
     }
 
@@ -80,13 +74,7 @@ impl Storage for LocalStorage {
         Ok((mime, content_length))
     }
 
-    fn put<R: io::Read>(&self,
-                        token: &str,
-                        filename: &str,
-                        reader: &mut R,
-                        _: &Mime,
-                        _: u64)
-                        -> Result<()> {
+    fn put<R: io::Read>(&self, token: &str, filename: &str, reader: &mut R) -> Result<()> {
         let dir_path = Path::new(&self.base_dir).join(token);
 
         if !dir_path.exists() {

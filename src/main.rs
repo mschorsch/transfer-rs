@@ -1,8 +1,9 @@
 // Inspired by https://github.com/dutchcoders/transfer.sh
 //
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
+// #![allow(unused_imports)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_must_use)]
 
 // externs
 //
@@ -25,6 +26,7 @@ extern crate iron;
 
 #[macro_use]
 extern crate router;
+extern crate multipart;
 
 #[macro_use]
 extern crate quick_error;
@@ -184,26 +186,27 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
 
     // Routes
 
-    // Health handler
+    // ** Health handler
     router.get(r"/health.html", health_handler);
 
-    // PUT upload handler
-    router.put(r"/put/:filename", PutHandler::new(storage.clone()));
-    router.put(r"/upload/:filename", PutHandler::new(storage.clone()));
-    router.put(r"/:filename", PutHandler::new(storage.clone()));
+    // ** PUT upload handler
+    let put_handler = PutHandler::new(storage.clone());
+    router.put(r"/upload", put_handler.clone()); // multipart/form
+    router.put(r"/upload/:filename", put_handler.clone()); // octet-stream
 
-    // POST
-    // TODO
+    // ** POST
+    let post_handler = PostHandler::new(storage.clone());
+    router.put(r"/upload", post_handler.clone()); // multipart/form
+    router.put(r"/upload/:filename", post_handler.clone()); // octet-stream
 
-    // Download handler
+    // ** GET handler
     router.get(r"/download/:token/:filename",
                GetHandler::new(storage.clone()));
-    router.get(r"/:token/:filename", GetHandler::new(storage.clone()));
-    router.get(r"/get/:token/:filename", GetHandler::new(storage.clone()));
 
-    // chain
+    // Chain
     let mut chain = Chain::new(router);
     chain.link_before(CheckHostHeaderMiddleware);
+    chain.link_before(MultipartMiddleware);
     chain.link_after(NotFoundMiddleware);
     chain.link_after(InfoMiddleware);
 
