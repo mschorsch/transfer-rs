@@ -14,6 +14,7 @@ extern crate simple_logger;
 extern crate clap;
 extern crate rand;
 extern crate regex;
+extern crate num_cpus;
 
 #[macro_use]
 extern crate lazy_static;
@@ -32,6 +33,8 @@ extern crate multipart;
 extern crate quick_error;
 extern crate mime_guess;
 
+extern crate openssl;
+
 // modules
 //
 mod handler;
@@ -39,6 +42,7 @@ mod codec;
 mod storage;
 mod errors;
 mod sanitize;
+mod server;
 
 // use
 //
@@ -55,6 +59,7 @@ use std::path::{Path, PathBuf};
 // intern
 use handler::*;
 use storage::*;
+use server::TransferServer;
 
 fn main() {
     let temp_dir = env::temp_dir();
@@ -104,6 +109,11 @@ fn main() {
             .value_name("SSL-PRIVATE-KEY")
             .takes_value(true)
             .help("Sets the ssl private key"))
+        .arg(Arg::with_name("ssl-cert-chain")
+            .long("ssl-cert-chain")
+            .value_name("SSL-CERTIFICATE-CHAIN")
+            .takes_value(true)
+            .help("Sets the ssl certificate chain"))
         .get_matches();
 
     let loglevel = matches.value_of("loglevel").unwrap(); // safe unwrap
@@ -157,9 +167,24 @@ fn main() {
     if use_ssl {
         let ssl_cert = PathBuf::from(matches.value_of("ssl-cert").unwrap());
         let ssl_key = PathBuf::from(matches.value_of("ssl-key").unwrap());
-        start_server_with_ssl(chain, port, ssl_cert, ssl_key);
+        let ssl_cert_chain = matches.value_of("ssl-cert-chain").map(|val| PathBuf::from(val));
+
+        if !ssl_cert.exists() {
+            error!("Ssl certificate not found.");
+            return;
+
+        } else if !ssl_key.exists() {
+            error!("Ssl key not found.");
+            return;
+
+        } else if ssl_cert_chain.is_some() && !ssl_cert_chain.clone().unwrap().exists() {
+            error!("Ssl certificate chain not found.");
+            return;            
+        };
+        TransferServer::new(chain).https(("0.0.0.0", port), ssl_cert, ssl_key, ssl_cert_chain).unwrap();
+        
     } else {
-        Iron::new(chain).http(("0.0.0.0", port)).unwrap();
+        TransferServer::new(chain).http(("0.0.0.0", port)).unwrap();
     }
 
     info!("Server stopped");
@@ -208,16 +233,4 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
     chain.link_after(InfoMiddleware);
 
     chain
-}
-
-fn start_server_with_ssl(chain: Chain, port: u16, ssl_cert: PathBuf, ssl_key: PathBuf) {
-    if !ssl_cert.exists() {
-        error!("Ssl certificate not found.");
-        return;
-
-    } else if !ssl_key.exists() {
-        error!("Ssl key not found.");
-        return;
-    }
-    Iron::new(chain).https(("0.0.0.0", port), ssl_cert, ssl_key).unwrap();
 }
