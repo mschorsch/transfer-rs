@@ -122,6 +122,17 @@ fn main() {
     set_loglevel(loglevel);
 
     let storage_provider = matches.value_of("storage").unwrap(); //safe unwrap
+
+    // let port = matches.is_present("port").map(|port_str| {
+    //     match port_str.parse::<u16>() {
+    //         Ok(p) => p,
+    //         Err(err) => {
+    //             error!("Invalid port: '{}'", err);
+    //             return;
+    //         }            
+    //     }
+    // }).or_else(||);
+
     let use_ssl = matches.is_present("ssl");
 
     // port
@@ -213,13 +224,11 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
 
     // ** PUT upload handler
     let put_handler = PutHandler::new(storage.clone());
-    router.put(r"/upload", put_handler.clone()); // multipart/form
-    router.put(r"/upload/:filename", put_handler.clone()); // octet-stream
+    router.put(r"/upload/:filename", put_handler.clone());
 
     // ** POST
     let post_handler = PostHandler::new(storage.clone());
-    router.put(r"/upload", post_handler.clone()); // multipart/form
-    router.put(r"/upload/:filename", post_handler.clone()); // octet-stream
+    router.post(r"/upload", post_handler.clone()); // multipart/form
 
     // ** GET handler
     router.get(r"/download/:token/:filename",

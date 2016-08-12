@@ -97,41 +97,11 @@ impl<S: Storage> PutHandler<S> {
 
 impl<S: Storage> Handler for PutHandler<S> {
     fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
-        if let Some(boundary_name) = req.extensions.get::<Boundary>().map(|b| b.name()) {
-            handle_multipart_request(&self.storage, req, &boundary_name)
-        } else {
-            handle_normal_request(&self.storage, req)
-        }
+        handle_put_request(&self.storage, req)
     }
 }
 
-
-// Post handler (multipart/form)
-//
-#[derive(Debug, Clone)]
-pub struct PostHandler<S: Storage> {
-    storage: S,
-}
-
-impl<S: Storage> PostHandler<S> {
-    pub fn new(storage: S) -> Self {
-        PostHandler { storage: storage }
-    }
-}
-
-impl<S: Storage> Handler for PostHandler<S> {
-    fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
-        if let Some(boundary_name) = req.extensions.get::<Boundary>().map(|b| b.name()) {
-            handle_multipart_request(&self.storage, req, &boundary_name)
-        } else {
-            handle_normal_request(&self.storage, req)
-        }
-    }
-}
-
-fn handle_normal_request<S: Storage>(storage: &S,
-                                     req: &mut IronRequest)
-                                     -> IronResult<IronResponse> {
+fn handle_put_request<S: Storage>(storage: &S, req: &mut IronRequest) -> IronResult<IronResponse> {
     let params = req.extensions.get::<Router>().unwrap();
     let ref filename = sanitize::sanitize_filename(&params["filename"]);
 
@@ -171,6 +141,32 @@ fn host_to_host_address(host: &headers::Host) -> String {
         host.hostname.to_owned()
     } else {
         format!("{}:{}", host.hostname, host.port.unwrap())
+    }
+}
+
+
+// Post handler (multipart/form)
+//
+#[derive(Debug, Clone)]
+pub struct PostHandler<S: Storage> {
+    storage: S,
+}
+
+impl<S: Storage> PostHandler<S> {
+    pub fn new(storage: S) -> Self {
+        PostHandler { storage: storage }
+    }
+}
+
+impl<S: Storage> Handler for PostHandler<S> {
+    fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
+        match req.extensions.get::<Boundary>().map(|b| b.name()) {
+            Some(boundary_name) => handle_multipart_request(&self.storage, req, &boundary_name),
+            None => {
+                Err(IronError::new(HttpError::Header,
+                                   (status::BadRequest, "Not a multipart/form request")))
+            }
+        }
     }
 }
 
