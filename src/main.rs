@@ -59,7 +59,7 @@ use std::path::{Path, PathBuf};
 // intern
 use handler::*;
 use storage::*;
-use server::TransferServer;
+use server::*;
 
 fn main() {
     let temp_dir = env::temp_dir();
@@ -129,7 +129,7 @@ fn main() {
     //         Err(err) => {
     //             error!("Invalid port: '{}'", err);
     //             return;
-    //         }            
+    //         }
     //     }
     // }).or_else(||);
 
@@ -190,12 +190,17 @@ fn main() {
 
         } else if ssl_cert_chain.is_some() && !ssl_cert_chain.clone().unwrap().exists() {
             error!("Ssl certificate chain not found.");
-            return;            
+            return;
         };
-        TransferServer::new(chain).https(("0.0.0.0", port), ssl_cert, ssl_key, ssl_cert_chain).unwrap();
-        
+
+        let addr = ("0.0.0.0", port);
+        let protocol = ExtIronProtocol::with_https(ssl_cert, ssl_key, ssl_cert_chain);
+
+        TransferServer::new(chain, addr, protocol).init().unwrap();
+
     } else {
-        TransferServer::new(chain).http(("0.0.0.0", port)).unwrap();
+        let addr = ("0.0.0.0", port);
+        TransferServer::new(chain, addr, ExtIronProtocol::Http).init().unwrap();
     }
 
     info!("Server stopped");

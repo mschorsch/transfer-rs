@@ -2,7 +2,7 @@
 // Copied http://hyper.rs/hyper/v0.9.10/src/hyper/src/net.rs.html#707-718
 // Intermediate certificate added
 
-// !! Remove this module when iron supports intermediate certificates !! 
+// !! Remove this module when iron supports intermediate certificates !!
 
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::path::Path;
@@ -20,69 +20,107 @@ use iron::request::HttpRequest as IronHttpRequest;
 use iron::response::HttpResponse as IronHttpResponse;
 use iron::error::HttpResult as IronHttpResult;
 
-use iron::{Request as IronRequest, Handler as IronHandler, Protocol, Timeouts};
+use iron::{Request as IronRequest, Handler as IronHandler, Protocol as IronProtocol, Timeouts};
 use iron::status;
 
 use openssl::ssl::{SslContext, SslMethod, SSL_VERIFY_NONE};
 use openssl::ssl::error::SslError;
 use openssl::x509::X509FileType;
 
-pub struct TransferServer<H> {
-    handler: H,
-    addr: Option<SocketAddr>,
-    protocol: Option<Protocol>,
+#[derive(Clone)]
+pub enum ExtIronProtocol {
+    Http,
+
+    Https {
+        certificate: PathBuf,
+        key: PathBuf,
+        certificate_chain: Option<PathBuf>,
+    },
 }
 
-impl<H: IronHandler> TransferServer<H> {
-    pub fn new(handler: H) -> TransferServer<H> {
-        TransferServer {
-            handler: handler,
-            addr: None,
-            protocol: None,
+impl ExtIronProtocol {
+    pub fn with_https(certificate: PathBuf,
+                      key: PathBuf,
+                      certificate_chain: Option<PathBuf>)
+                      -> Self {
+        ExtIronProtocol::Https {
+            certificate: certificate,
+            key: key,
+            certificate_chain: certificate_chain,
         }
     }
 
-    pub fn http<A: ToSocketAddrs>(mut self, addr: A) -> IronHttpResult<Listening> {
+    fn to_iron_protocol(&self) -> IronProtocol {
+        match *self {
+            ExtIronProtocol::Http => IronProtocol::Http,
+            ExtIronProtocol::Https { ref certificate, ref key, .. } => {
+                IronProtocol::Https {
+                    certificate: certificate.clone(),
+                    key: key.clone(),
+                }
+            }
+        }
+    }
+}
+
+pub struct TransferServer<H> {
+    handler: H,
+    sock_addr: SocketAddr,
+    ext_protocol: ExtIronProtocol,
+    protocol: IronProtocol,
+}
+
+impl<H: IronHandler> TransferServer<H> {
+    pub fn new<A: ToSocketAddrs>(handler: H,
+                                 addr: A,
+                                 protocol: ExtIronProtocol)
+                                 -> TransferServer<H> {
         let sock_addr = addr.to_socket_addrs()
             .ok()
             .and_then(|mut addrs| addrs.next())
             .expect("Could not parse socket address.");
 
-        self.addr = Some(sock_addr);
-        self.protocol = Some(Protocol::Http.clone());
+        let iron_protocol = protocol.to_iron_protocol();
 
-        let mut server = try!(HyperServer::http(sock_addr));
-        let timeouts = Timeouts::default();
-        server.keep_alive(timeouts.keep_alive);
-        server.set_read_timeout(timeouts.read);
-        server.set_write_timeout(timeouts.write);
-        server.handle_threads(self, 8 * ::num_cpus::get())
+        TransferServer {
+            handler: handler,
+            sock_addr: sock_addr,
+            ext_protocol: protocol,
+            protocol: iron_protocol,
+        }
     }
 
-    pub fn https<A: ToSocketAddrs>(mut self,
-                                   addr: A,
-                                   certificate: PathBuf,
-                                   key: PathBuf,
-                                   certificate_chain: Option<PathBuf>)
-                                   -> IronHttpResult<Listening> {
-        let sock_addr = addr.to_socket_addrs()
-            .ok()
-            .and_then(|mut addrs| addrs.next())
-            .expect("Could not parse socket address.");
-
-        self.addr = Some(sock_addr);
-        self.protocol = Some(Protocol::Https {
-            certificate: certificate.clone(),
-            key: key.clone(),
-        });
-
-        let ssl = try!(create_openssl(certificate, key, certificate_chain));
-        let mut server = try!(HyperServer::https(sock_addr, ssl));
+    pub fn init(self) -> IronHttpResult<Listening> {
         let timeouts = Timeouts::default();
-        server.keep_alive(timeouts.keep_alive);
-        server.set_read_timeout(timeouts.read);
-        server.set_write_timeout(timeouts.write);
-        server.handle_threads(self, 8 * ::num_cpus::get())
+
+        let ssl_tup = match self.ext_protocol {
+            ExtIronProtocol::Http => (false, None, None, None),
+            ExtIronProtocol::Https { ref certificate, ref key, ref certificate_chain } => {
+                (true, Some(certificate.clone()), Some(key.clone()), certificate_chain.clone())
+            }
+        };
+
+        match ssl_tup {
+            // HTTP
+            (false, _, _, _) => {
+                let mut server = try!(HyperServer::http(self.sock_addr));
+                server.keep_alive(timeouts.keep_alive);
+                server.set_read_timeout(timeouts.read);
+                server.set_write_timeout(timeouts.write);
+                server.handle_threads(self, 8 * ::num_cpus::get())
+            }
+
+            // HTTPS
+            (true, cert, key, cert_chain) => {
+                let ssl = try!(create_openssl(cert.unwrap(), key.unwrap(), cert_chain));
+
+                let mut server = try!(HyperServer::https(self.sock_addr, ssl));
+                server.keep_alive(timeouts.keep_alive);
+                server.set_read_timeout(timeouts.read);
+                server.set_write_timeout(timeouts.write);
+                server.handle_threads(self, 8 * ::num_cpus::get())
+            }
+        }
     }
 }
 
@@ -114,9 +152,7 @@ impl<H: IronHandler> HyperHandler for TransferServer<H> {
     fn handle(&self, http_req: IronHttpRequest, mut http_res: IronHttpResponse<Fresh>) {
         *http_res.status_mut() = status::InternalServerError;
 
-        match IronRequest::from_http(http_req,
-                                     self.addr.clone().unwrap(),
-                                     self.protocol.as_ref().unwrap()) {
+        match IronRequest::from_http(http_req, self.sock_addr.clone(), &self.protocol) {
             Ok(mut req) => {
                 self.handler
                     .handle(&mut req)
