@@ -190,16 +190,12 @@ fn handle_multipart_request<S: Storage>(storage: &S,
 
                     info!("Uploading => token: '{}', filename: '{}'", token, filename);
 
-                    match storage.put(&token, &filename, &mut multipart_file) {
-                        Ok(_) => {
-                            result_message.push_str(&format!("{}://{}/{}/{}\n",
-                                                             url_scheme,
-                                                             host_address,
-                                                             token,
-                                                             filename))
-                        }
-                        Err(err) => return Err(IronError::new(err, status::InternalServerError)),
-                    };
+                    let msg = try!(storage.put(&token, &filename, &mut multipart_file)
+                        .map(|_| {
+                            format!("{}://{}/{}/{}\n", url_scheme, host_address, token, filename)
+                        })
+                        .map_err(|err| IronError::new(err, status::InternalServerError)));
+                    result_message.push_str(&msg);
                 }
             }
             Ok(None) => {

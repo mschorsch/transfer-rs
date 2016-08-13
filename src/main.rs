@@ -9,7 +9,7 @@
 //
 #[macro_use]
 extern crate log;
-extern crate simple_logger;
+extern crate log4rs;
 
 extern crate clap;
 extern crate rand;
@@ -21,11 +21,7 @@ extern crate lazy_static;
 
 #[macro_use]
 extern crate hyper;
-
-#[macro_use]
 extern crate iron;
-
-#[macro_use]
 extern crate router;
 extern crate multipart;
 
@@ -48,24 +44,36 @@ mod server;
 //
 
 // extern
-use clap::{Arg, App};
-use log::LogLevel;
-use iron::prelude::*;
+use clap::{Arg, ArgMatches, App};
+use iron::Chain;
 use router::Router;
+
+use log::LogLevelFilter;
+use log4rs::config::{Config, Logger, Root, Appender};
+use log4rs::append::console::ConsoleAppender;
+use log4rs::encode::pattern::PatternEncoder;
 
 use std::env;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 // intern
 use handler::*;
 use storage::*;
 use server::*;
+use errors::{TransferError, Result};
 
 fn main() {
     let temp_dir = env::temp_dir();
-    let temp_dir_str = temp_dir.to_str().unwrap();
+    let temp_dir_str = temp_dir.to_str().expect("Temp dir not found");
 
-    let matches = App::new("transfer.rs")
+    if let Err(err) = init_server(match_cmd_arguments(temp_dir_str)) {
+        error!("{}", err);
+    }
+}
+
+fn match_cmd_arguments<'a>(temp_dir: &'a str) -> ArgMatches<'a> {
+    App::new("transfer.rs")
         .version("0.1.0")
         .about("Easy file sharing from the command line")
         .arg(Arg::with_name("port")
@@ -79,7 +87,7 @@ fn main() {
             .long("basedir")
             .value_name("BASEDIR")
             .takes_value(true)
-            .default_value(temp_dir_str)
+            .default_value(temp_dir)
             .help("Sets the base directory"))
         .arg(Arg::with_name("loglevel")
             .long("loglevel")
@@ -114,115 +122,118 @@ fn main() {
             .value_name("SSL-CERTIFICATE-CHAIN")
             .takes_value(true)
             .help("Sets the ssl certificate chain"))
-        .get_matches();
+        .get_matches()
+}
 
-    let loglevel = matches.value_of("loglevel").unwrap(); // safe unwrap
+fn init_server(arg_matches: ArgMatches) -> Result<()> {
+    let loglevel = try!(init_logger(arg_matches.value_of("loglevel")));
+    let use_ssl = arg_matches.is_present("ssl");
+    let port: u16 = try!(get_port(arg_matches.value_of("port"), use_ssl));
+    let basedir: &str = try!(get_directory(arg_matches.value_of("basedir")));
+    let storage_provider = try!(arg_matches.value_of("storage")
+        .ok_or(TransferError::from("Unknown storage")));
 
-    // Loglevel
-    set_loglevel(loglevel);
+    let addr = ("0.0.0.0", port);
+    let protocol = try!(to_protocol(use_ssl,
+                                    arg_matches.value_of("ssl-cert"),
+                                    arg_matches.value_of("ssl-key"),
+                                    arg_matches.value_of("ssl-cert-chain")));
+    let chain = try!(init_chain_from_storage(storage_provider, basedir));
 
-    let storage_provider = matches.value_of("storage").unwrap(); //safe unwrap
-
-    // let port = matches.is_present("port").map(|port_str| {
-    //     match port_str.parse::<u16>() {
-    //         Ok(p) => p,
-    //         Err(err) => {
-    //             error!("Invalid port: '{}'", err);
-    //             return;
-    //         }
-    //     }
-    // }).or_else(||);
-
-    let use_ssl = matches.is_present("ssl");
-
-    // port
-    let mut port = if use_ssl {
-        443u16
-    } else {
-        80u16
-    };
-
-    port = if matches.is_present("port") {
-        match matches.value_of("port").unwrap().parse::<u16>() {
-            Ok(p) => p,
-            Err(err) => {
-                error!("Invalid port: '{}'", err);
-                return;
-            }
-        }
-    } else {
-        port
-    };
-
-    let basedir = matches.value_of("basedir").unwrap(); // save unwrap
-    if !Path::new(basedir).exists() {
-        error!("Invalid base directory '{}'", basedir);
-        return;
-    }
-
-    // Init handler chain
-    let chain = match storage_provider {
-        "local" => init_handler_chain(LocalStorage::new(basedir)),
-        _ => init_handler_chain(EmptyStorage),
-    };
-
-    info!("### transfer.rs server started. ###");
-    info!("Listening on port: {}.", port);
+    info!("#####################################################");
+    info!("#                    transfer.rs                    #");
+    info!("#####################################################");
+    info!("");
+    info!("Listening on port: '{}'.", port);
     info!("Using log level: '{}'.", loglevel);
     info!("Using storage provider '{}' with base directory '{}'.",
           storage_provider,
           basedir);
-    info!("Using ssl: {}.", use_ssl);
+    info!("Using ssl: '{}'.", use_ssl);
 
-    // Start Server
-    if use_ssl {
-        let ssl_cert = PathBuf::from(matches.value_of("ssl-cert").unwrap());
-        let ssl_key = PathBuf::from(matches.value_of("ssl-key").unwrap());
-        let ssl_cert_chain = matches.value_of("ssl-cert-chain").map(|val| PathBuf::from(val));
+    try!(TransferServer::new(chain, addr, protocol)).init().unwrap();
 
-        if !ssl_cert.exists() {
-            error!("Ssl certificate not found.");
-            return;
-
-        } else if !ssl_key.exists() {
-            error!("Ssl key not found.");
-            return;
-
-        } else if ssl_cert_chain.is_some() && !ssl_cert_chain.clone().unwrap().exists() {
-            error!("Ssl certificate chain not found.");
-            return;
-        };
-
-        let addr = ("0.0.0.0", port);
-        let protocol = ExtIronProtocol::with_https(ssl_cert, ssl_key, ssl_cert_chain);
-
-        TransferServer::new(chain, addr, protocol).init().unwrap();
-
-    } else {
-        let addr = ("0.0.0.0", port);
-        TransferServer::new(chain, addr, ExtIronProtocol::Http).init().unwrap();
-    }
-
-    info!("Server stopped");
+    Ok(())
 }
 
-fn set_loglevel(cmd_level: &str) {
-    let level = match cmd_level {
-        "error" => LogLevel::Error,
-        "warn" => LogLevel::Warn,
-        "info" => LogLevel::Info,
-        "debug" => LogLevel::Debug,
-        "trace" => LogLevel::Trace,
-        _ => unreachable!("Unknown log level"),
-    };
+fn init_chain_from_storage(storage: &str, basedir: &str) -> Result<Chain> {
+    match storage {
+        "local" => Ok(init_handler_chain(LocalStorage::new(basedir))),
+        _ => Err(TransferError::from(format!("Invalid storage '{}'", storage))),
+    }
+}
 
-    simple_logger::init_with_level(level).unwrap();
+fn to_protocol(ssl: bool,
+               ssl_cert: Option<&str>,
+               ssl_key: Option<&str>,
+               ssl_cert_chain: Option<&str>)
+               -> Result<ExtIronProtocol> {
+    if ssl {
+        let cert = PathBuf::from(try!(get_directory(ssl_cert)));
+        let key = PathBuf::from(try!(get_directory(ssl_key)));
+        let cert_chain = if ssl_cert_chain.is_some() {
+            Some(PathBuf::from(try!(get_directory(ssl_cert_chain))))
+        } else {
+            None
+        };
+        Ok(ExtIronProtocol::with_https(cert, key, cert_chain))
+    } else {
+        Ok(ExtIronProtocol::Http)
+    }
+}
+
+fn get_port(port: Option<&str>, ssl: bool) -> Result<u16> {
+    port.map(|port_str| port_str.parse::<u16>().map_err(|err| TransferError::from(err)))
+        .unwrap_or_else(|| {
+            if ssl {
+                Ok(443u16)
+            } else {
+                Ok(80u16)
+            }
+        })
+}
+
+fn get_directory<'a>(directory: Option<&'a str>) -> Result<&'a str> {
+    directory.map(|dir| {
+            if Path::new(dir).exists() {
+                Ok(dir)
+            } else {
+                Err(TransferError::from(format!("Invalid directory '{}'", dir)))
+            }
+        })
+        .unwrap()
+}
+
+fn init_logger(log_level: Option<&str>) -> Result<LogLevelFilter> {
+    let level = try!(LogLevelFilter::from_str(log_level.unwrap_or("info"))
+        .map_err(|_| TransferError::from("Unknown log level")));
+
+    // Appender
+    let stdout_appender = Appender::builder()
+        .build("stdout".to_owned(),
+               Box::new(ConsoleAppender::builder()
+                   .encoder(Box::new(PatternEncoder::new("{h({l})} {m}{n}")))
+                   .build()));
+
+    // Root logger
+    let root = Root::builder().appender("stdout".to_owned()).build(level);
+
+    // Logger
+    let transerrs_logger = Logger::builder().build("transfer_rs".to_owned(), level);
+    let multipart_logger = Logger::builder().build("multipart".to_owned(), LogLevelFilter::Error);
+
+    let config = Config::builder()
+        .appender(stdout_appender)
+        .logger(transerrs_logger)
+        .logger(multipart_logger)
+        .build(root)
+        .unwrap();
+
+    log4rs::init_config(config).and(Ok(level)).map_err(|err| TransferError::from(err))
 }
 
 fn init_handler_chain<S: Storage>(storage: S) -> Chain {
     let mut router = Router::new();
-
-    // Routes
 
     // ** Health handler
     router.get(r"/health.html", health_handler);

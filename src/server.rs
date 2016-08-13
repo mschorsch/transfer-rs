@@ -1,4 +1,4 @@
-// Mostly copied from https://github.com/iron/iron/blob/e8f646431ec65d47c2abaf66e27609bce1e64d20/src/iron.rs
+// Partwise copied from https://github.com/iron/iron/blob/e8f646431ec65d47c2abaf66e27609bce1e64d20/src/iron.rs
 // Copied http://hyper.rs/hyper/v0.9.10/src/hyper/src/net.rs.html#707-718
 // Intermediate certificate added
 
@@ -26,6 +26,8 @@ use iron::status;
 use openssl::ssl::{SslContext, SslMethod, SSL_VERIFY_NONE};
 use openssl::ssl::error::SslError;
 use openssl::x509::X509FileType;
+
+use errors::TransferError;
 
 #[derive(Clone)]
 pub enum ExtIronProtocol {
@@ -73,21 +75,24 @@ pub struct TransferServer<H> {
 impl<H: IronHandler> TransferServer<H> {
     pub fn new<A: ToSocketAddrs>(handler: H,
                                  addr: A,
-                                 protocol: ExtIronProtocol)
-                                 -> TransferServer<H> {
-        let sock_addr = addr.to_socket_addrs()
-            .ok()
-            .and_then(|mut addrs| addrs.next())
-            .expect("Could not parse socket address.");
+                                 ext_protocol: ExtIronProtocol)
+                                 -> ::errors::Result<TransferServer<H>> {
 
-        let iron_protocol = protocol.to_iron_protocol();
+        let sock_addr: SocketAddr = try!(try!(addr.to_socket_addrs()
+                .map_err(|err| {
+                    TransferError::from(format!("Could not initialize socket address: '{}'", err))
+                })
+                .map(|mut addrs| addrs.next()))
+            .ok_or(TransferError::from("Could not parse socket address.")));
 
-        TransferServer {
+        let iron_protocol = ext_protocol.to_iron_protocol();
+
+        Ok(TransferServer {
             handler: handler,
             sock_addr: sock_addr,
-            ext_protocol: protocol,
+            ext_protocol: ext_protocol,
             protocol: iron_protocol,
-        }
+        })
     }
 
     pub fn init(self) -> IronHttpResult<Listening> {
