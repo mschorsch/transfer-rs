@@ -192,7 +192,7 @@ fn handle_multipart_request<S: Storage>(storage: &S,
 
                     let msg = try!(storage.put(&token, &filename, &mut multipart_file)
                         .map(|_| {
-                            format!("{}://{}/{}/{}\n", url_scheme, host_address, token, filename)
+                            format!("{}://{}/download/{}/{}\n", url_scheme, host_address, token, filename)
                         })
                         .map_err(|err| IronError::new(err, status::InternalServerError)));
                     result_message.push_str(&msg);
