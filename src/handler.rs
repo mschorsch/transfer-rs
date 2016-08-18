@@ -7,20 +7,66 @@ use iron::status;
 use iron::headers;
 use iron::modifiers;
 use iron::response;
-use iron::mime::{Mime, TopLevel, SubLevel};
+use iron::mime::{Mime, TopLevel, SubLevel, Attr, Value};
 use iron::error::{HttpError, IronError};
+use iron::typemap::Key;
 use router::{NoRoute, Router};
 use mime_guess;
 use multipart::server::{Multipart, MultipartData};
-use iron::typemap::Key;
+use url::percent_encoding::percent_decode;
 
 // standard use
 use std::path::Path;
+use std::borrow::Cow;
 
 // intern use
 use sanitize;
 use storage::Storage;
 use codec;
+
+
+// static sources
+static INDEX_HTML: &'static str = include_str!("../src-web/index.html");
+static DROPZONE_JS: &'static str = include_str!("../src-web/js/dropzone.min.js");
+static DROPZONE_CSS: &'static str = include_str!("../src-web/css/dropzone.min.css");
+static APP_JS: &'static str = include_str!("../src-web/js/app.js");
+static APP_CSS: &'static str = include_str!("../src-web/css/app.css");
+
+lazy_static! {
+    static ref APPLICATION_JS_MIME: Mime = Mime(TopLevel::Application, SubLevel::Javascript, vec![(Attr::Charset, Value::Utf8)]);
+    static ref TEXT_CSS_MIME: Mime =  Mime(TopLevel::Text, SubLevel::Css, vec![(Attr::Charset, Value::Utf8)]);
+    static ref TEXT_HTML_MIME: Mime = Mime(TopLevel::Text, SubLevel::Html, vec![(Attr::Charset, Value::Utf8)]);
+}
+
+// view handler
+//
+#[derive(Debug, Clone)]
+pub struct StaticViewHandler;
+
+impl StaticViewHandler {
+    pub fn new() -> Self {
+        StaticViewHandler
+    }
+}
+
+impl Handler for StaticViewHandler {
+    fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
+        let params = req.extensions.get::<Router>().unwrap();
+        let static_resources = params.find("static_resource");
+
+        let modifier = match static_resources {
+            Some("dropzone.min.js") => (APPLICATION_JS_MIME.clone(), status::Ok, DROPZONE_JS),
+            Some("app.js") => (APPLICATION_JS_MIME.clone(), status::Ok, APP_JS),            
+            Some("app.css") => (TEXT_CSS_MIME.clone(), status::Ok, APP_CSS),
+            Some("dropzone.min.css") => (TEXT_CSS_MIME.clone(), status::Ok, DROPZONE_CSS),
+            Some(_) => (TEXT_HTML_MIME.clone(), status::Ok, INDEX_HTML),
+            None => (TEXT_HTML_MIME.clone(), status::Ok, INDEX_HTML),
+        };
+
+
+        Ok(IronResponse::with(modifier))
+    }
+}
 
 // health handler
 //
@@ -46,9 +92,11 @@ impl<S: Storage> Handler for GetHandler<S> {
     fn handle(&self, req: &mut IronRequest) -> IronResult<IronResponse> {
         let params = req.extensions.get::<Router>().unwrap();
         let token = &params["token"];
-        let ref filename = sanitize::sanitize_filename(&params["filename"]);
+        let filename = sanitize::sanitize_filename(&*percent_decode(params["filename"].as_bytes())
+            .decode_utf8()
+            .unwrap_or(Cow::Borrowed("")));
 
-        let storage_result = self.storage.get(token, filename);
+        let storage_result = self.storage.get(token, &filename);
 
         match storage_result {
             Err(ref err) => {
@@ -68,7 +116,7 @@ impl<S: Storage> Handler for GetHandler<S> {
                     parameters: vec![headers::DispositionParam::Filename(
                             headers::Charset::Iso_8859_1,
                             None, // optional language tag
-                            filename.clone().into_bytes()
+                            filename.into_bytes()
                         )],
                 });
                 response.headers.set(headers::Connection::close());
@@ -192,7 +240,11 @@ fn handle_multipart_request<S: Storage>(storage: &S,
 
                     let msg = try!(storage.put(&token, &filename, &mut multipart_file)
                         .map(|_| {
-                            format!("{}://{}/download/{}/{}\n", url_scheme, host_address, token, filename)
+                            format!("{}://{}/download/{}/{}\n",
+                                    url_scheme,
+                                    host_address,
+                                    token,
+                                    filename)
                         })
                         .map_err(|err| IronError::new(err, status::InternalServerError)));
                     result_message.push_str(&msg);
@@ -268,13 +320,14 @@ pub struct NotFoundMiddleware;
 impl AfterMiddleware for NotFoundMiddleware {
     fn catch(&self, req: &mut IronRequest, err: IronError) -> IronResult<IronResponse> {
         if let Some(_) = err.error.downcast::<NoRoute>() {
-            let message = format!("why you calling {}?", req.url);
+            let message = format!("{} not found", req.url);
             Ok(IronResponse::with((status::NotFound, message)))
         } else {
             Err(err)
         }
     }
 }
+
 
 // Info middleware
 //

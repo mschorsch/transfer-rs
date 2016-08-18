@@ -15,6 +15,7 @@ extern crate clap;
 extern crate rand;
 extern crate regex;
 extern crate num_cpus;
+extern crate url;
 
 #[macro_use]
 extern crate lazy_static;
@@ -158,7 +159,7 @@ fn init_server(arg_matches: ArgMatches) -> Result<()> {
 
 fn init_chain_from_storage(storage: &str, basedir: &str) -> Result<Chain> {
     match storage {
-        "local" => Ok(init_handler_chain(LocalStorage::new(basedir))),
+        "local" => Ok(try!(init_handler_chain(LocalStorage::new(basedir)))),
         _ => Err(TransferError::from(format!("Invalid storage '{}'", storage))),
     }
 }
@@ -232,8 +233,10 @@ fn init_logger(log_level: Option<&str>) -> Result<LogLevelFilter> {
     log4rs::init_config(config).and(Ok(level)).map_err(|err| TransferError::from(err))
 }
 
-fn init_handler_chain<S: Storage>(storage: S) -> Chain {
+fn init_handler_chain<S: Storage>(storage: S) -> Result<Chain> {
     let mut router = Router::new();
+
+    // Routes
 
     // ** Health handler
     router.get(r"/health.html", health_handler);
@@ -250,6 +253,13 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
     router.get(r"/download/:token/:filename",
                GetHandler::new(storage.clone()));
 
+    // ** View handler
+    let view_handler = StaticViewHandler::new();
+    router.get(r"/", view_handler.clone());
+    router.get(r"/:static_resource", view_handler.clone());
+    router.get(r"/js/:static_resource", view_handler.clone());
+    router.get(r"/css/:static_resource", view_handler.clone());
+
     // Chain
     let mut chain = Chain::new(router);
     chain.link_before(CheckHostHeaderMiddleware);
@@ -257,5 +267,5 @@ fn init_handler_chain<S: Storage>(storage: S) -> Chain {
     chain.link_after(NotFoundMiddleware);
     chain.link_after(InfoMiddleware);
 
-    chain
+    Ok(chain)
 }

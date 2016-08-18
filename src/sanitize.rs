@@ -67,4 +67,9 @@ mod tests {
         assert_eq!(sanitize_filename("*my.txt*"), "my.txt");
         assert_eq!(sanitize_filename("*my.t?xt*"), "my.txt");
     }
+
+    #[test]
+    fn test_sanitize_filename6() {
+        assert_eq!(sanitize_filename("a b (1).txt"), "a b (1).txt");
+    }    
 }
